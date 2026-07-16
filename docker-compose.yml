@@ -1,0 +1,70 @@
+services:
+  postgres:
+    image: postgres:15
+    environment:
+      - POSTGRES_DB=video_studio
+      - POSTGRES_USER=videostudio
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U videostudio"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  backend:
+    build: ./video_studio_module/backend
+    volumes:
+      - ./video_studio_module/backend:/app
+      - ./video_studio_module/backend/media:/app/media
+    environment:
+      - DEBUG=${DEBUG:-True}
+      - ALLOWED_HOSTS=${ALLOWED_HOSTS:-localhost,127.0.0.1}
+      - CORS_ALLOWED_ORIGINS=${CORS_ALLOWED_ORIGINS:-https://localhost,http://localhost}
+      - DATABASE_URL=postgresql://videostudio:${POSTGRES_PASSWORD}@postgres:5432/video_studio
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+        reservations:
+          memory: 1G
+    command: sh -c "python manage.py migrate && python manage.py runserver 0.0.0.0:8000"
+
+  frontend:
+    build: ./video_studio_module/video-frontend
+    volumes:
+      - ./video_studio_module/video-frontend:/app
+      - /app/node_modules
+    environment:
+      - REACT_APP_API_URL=https://192.168.1.168/api
+      - HOST=0.0.0.0
+      - FAST_REFRESH=false
+      - WDS_SOCKET_HOST=localhost
+      - WDS_SOCKET_PORT=3000
+      - WDS_SOCKET_PROTOCOL=ws
+    ports:
+      - "3000:3000"
+    command: npm run start:http
+
+  nginx:
+    image: nginx:alpine
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf
+      - ./certs:/etc/nginx/certs
+    depends_on:
+      - frontend
+      - backend
+
+volumes:
+  postgres_data:
